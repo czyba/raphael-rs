@@ -142,6 +142,9 @@ impl StepLowerBoundSolver {
             let progress_only = reduced_state.progress_only
                 || is_progress_only_state(&self.settings, &new_full_state);
             let new_step_budget = reduced_state.steps_budget.get() - action.steps();
+            let new_condition = condition
+                .follow_up_condition_after_steps(action.steps())
+                .unwrap_or(Condition::Normal);
             match NonZeroU8::try_from(new_step_budget) {
                 Ok(new_step_budget) if new_full_state.durability > 0 => {
                     // New state is not final
@@ -150,7 +153,7 @@ impl StepLowerBoundSolver {
                     if let Some(pareto_front) = self.solved_states.get(&new_reduced_state) {
                         self.pareto_front_builder.push_slice(pareto_front);
                     } else {
-                        self.solve_state(new_reduced_state, condition)?;
+                        self.solve_state(new_reduced_state, new_condition)?;
                     }
                     self.pareto_front_builder
                         .peek_mut()

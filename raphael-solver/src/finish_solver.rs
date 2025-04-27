@@ -75,8 +75,9 @@ impl FinishSolver {
                         if new_state.is_final(&self.settings.simulator_settings) {
                             max_progress = std::cmp::max(max_progress, new_state.progress);
                         } else {
-                            let next_condition =
-                                condition.follow_up_condition().unwrap_or(Condition::Normal);
+                            let next_condition = condition
+                                .follow_up_condition_after_steps(action.steps())
+                                .unwrap_or(Condition::Normal);
                             let child_progress = self.solve_max_progress(
                                 ReducedState::from_state(&new_state),
                                 next_condition,
