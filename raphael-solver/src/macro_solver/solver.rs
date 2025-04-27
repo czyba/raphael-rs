@@ -3,7 +3,7 @@ use raphael_sim::*;
 use super::search_queue::SearchScore;
 use crate::actions::{
     ActionCombo, FULL_SEARCH_ACTIONS, PROGRESS_ONLY_SEARCH_ACTIONS, is_progress_only_state,
-    use_action_combo,
+    use_action_combo_with_condition,
 };
 use crate::macro_solver::fast_lower_bound::fast_lower_bound;
 use crate::macro_solver::search_queue::SearchQueue;
@@ -70,9 +70,13 @@ impl<'a> MacroSolver<'a> {
 
         let _total_time = ScopedTimer::new("Total Time");
         let initial_state = self.settings.initial_state();
+        let initial_condition = self.settings.initial_condition();
 
         let timer = ScopedTimer::new("Finish Solver");
-        if !self.finish_solver.can_finish(&initial_state) {
+        if !self
+            .finish_solver
+            .can_finish(&initial_state, initial_condition)
+        {
             return Err(SolverException::NoSolution);
         }
         drop(timer);
@@ -80,24 +84,31 @@ impl<'a> MacroSolver<'a> {
         _ = rayon::join(
             || {
                 let _timer = ScopedTimer::new("Quality UB Solver");
-                self.quality_ub_solver.precompute(self.settings.max_cp())
+                self.quality_ub_solver
+                    .precompute(self.settings.max_cp(), initial_condition)
             },
             || {
                 let _timer = ScopedTimer::new("Step LB Solver");
                 let mut seed_state = SimulationState::new(&self.settings.simulator_settings);
                 seed_state.effects.set_combo(Combo::None);
-                self.step_lb_solver.step_lower_bound(seed_state, 0)
+                self.step_lb_solver
+                    .step_lower_bound(seed_state, initial_condition, 0)
             },
         );
 
         let _timer = ScopedTimer::new("Search");
-        Ok(self.do_solve(initial_state)?.actions())
+        Ok(self.do_solve(initial_state, initial_condition)?.actions())
     }
 
-    fn do_solve(&mut self, state: SimulationState) -> Result<Solution, SolverException> {
+    fn do_solve(
+        &mut self,
+        state: SimulationState,
+        initial_condition: Condition,
+    ) -> Result<Solution, SolverException> {
         let mut search_queue = {
             let quality_lower_bound = fast_lower_bound(
                 state,
+                initial_condition,
                 self.settings,
                 self.interrupt_signal.clone(),
                 &mut self.finish_solver,
@@ -123,6 +134,10 @@ impl<'a> MacroSolver<'a> {
                 (self.progress_callback)(popped);
             }
 
+            let current_condition = initial_condition
+                .follow_up_condition_after_steps(score.current_steps)
+                .unwrap_or(Condition::Normal);
+
             let progress_only = is_progress_only_state(&self.settings, &state);
             let search_actions = match progress_only {
                 true => PROGRESS_ONLY_SEARCH_ACTIONS,
@@ -130,9 +145,20 @@ impl<'a> MacroSolver<'a> {
             };
 
             for action in search_actions {
-                if let Ok(state) = use_action_combo(&self.settings, state, *action) {
+                if let Ok(state) = use_action_combo_with_condition(
+                    &self.settings,
+                    state,
+                    *action,
+                    current_condition,
+                ) {
+                    let condition_after_action = current_condition
+                        .follow_up_condition_after_steps(action.steps())
+                        .unwrap_or(Condition::Normal);
                     if !state.is_final(&self.settings.simulator_settings) {
-                        if !self.finish_solver.can_finish(&state) {
+                        if !self
+                            .finish_solver
+                            .can_finish(&state, condition_after_action)
+                        {
                             // skip this state if it is impossible to max out Progress
                             continue;
                         }
@@ -150,7 +176,8 @@ impl<'a> MacroSolver<'a> {
                         } else {
                             std::cmp::min(
                                 score.quality_upper_bound,
-                                self.quality_ub_solver.quality_upper_bound(state)?,
+                                self.quality_ub_solver
+                                    .quality_upper_bound(state, condition_after_action)?,
                             )
                         };
 
@@ -161,7 +188,7 @@ impl<'a> MacroSolver<'a> {
                             match quality_upper_bound >= self.settings.max_quality() {
                                 true => self
                                     .step_lb_solver
-                                    .step_lower_bound(state, step_lb_hint)?
+                                    .step_lower_bound(state, condition_after_action, step_lb_hint)?
                                     .saturating_add(score.current_steps + action.steps()),
                                 false => score.current_steps + action.steps(),
                             };

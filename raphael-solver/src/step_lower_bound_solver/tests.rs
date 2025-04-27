@@ -18,7 +18,7 @@ fn solve(simulator_settings: Settings, actions: &[Action]) -> u8 {
         allow_unsound_branch_pruning: false,
     };
     StepLowerBoundSolver::new(solver_settings, Default::default())
-        .step_lower_bound(state, 0)
+        .step_lower_bound(state, Condition::Normal, 0)
         .unwrap()
 }
 
@@ -502,11 +502,15 @@ fn monotonic_fuzz_check(simulator_settings: Settings) {
     let mut solver = StepLowerBoundSolver::new(solver_settings, Default::default());
     for _ in 0..10000 {
         let state = random_state(&simulator_settings);
-        let state_lower_bound = solver.step_lower_bound(state, 0).unwrap();
+        let state_lower_bound = solver
+            .step_lower_bound(state, Condition::Normal, 0)
+            .unwrap();
         for action in FULL_SEARCH_ACTIONS {
             let child_lower_bound = match use_action_combo(&solver_settings, state, *action) {
                 Ok(child) => match child.is_final(&simulator_settings) {
-                    false => solver.step_lower_bound(child, 0).unwrap(),
+                    false => solver
+                        .step_lower_bound(child, Condition::Normal, 0)
+                        .unwrap(),
                     true if child.progress >= u32::from(simulator_settings.max_progress)
                         && child.quality >= u32::from(simulator_settings.max_quality) =>
                     {

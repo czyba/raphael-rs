@@ -176,13 +176,23 @@ pub fn is_progress_only_state(settings: &SolverSettings, state: &SimulationState
     false
 }
 
+#[cfg(test)]
 pub fn use_action_combo(
+    settings: &SolverSettings,
+    state: SimulationState,
+    action_combo: ActionCombo,
+) -> Result<SimulationState, &'static str> {
+    return use_action_combo_with_condition(settings, state, action_combo, Condition::Normal);
+}
+
+pub fn use_action_combo_with_condition(
     settings: &SolverSettings,
     mut state: SimulationState,
     action_combo: ActionCombo,
+    condition: Condition,
 ) -> Result<SimulationState, &'static str> {
     for action in action_combo.actions() {
-        state = state.use_action(*action, Condition::Normal, &settings.simulator_settings)?;
+        state = state.use_action(*action, condition, &settings.simulator_settings)?;
     }
     if is_progress_only_state(settings, &state) {
         // strip all quality-only data

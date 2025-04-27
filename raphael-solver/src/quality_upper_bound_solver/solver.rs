@@ -36,7 +36,7 @@ impl QualityUpperBoundSolver {
         }
     }
 
-    fn generate_precompute_templates(&self) -> Box<[(Template, i16)]> {
+    fn generate_precompute_templates(&self, condition: Condition) -> Box<[(Template, i16)]> {
         let mut templates = rustc_hash::FxHashMap::<Template, i16>::default();
         let mut queue = std::collections::BinaryHeap::<Node>::default();
 
@@ -67,7 +67,7 @@ impl QualityUpperBoundSolver {
             };
             for &action in FULL_SEARCH_ACTIONS {
                 if let Ok((new_state, _, _)) =
-                    state.use_action(action, &self.settings, self.durability_cost)
+                    state.use_action(action, &self.settings, self.durability_cost, condition)
                 {
                     let used_cp = self.settings.max_cp() - new_state.cp;
                     let new_node = Node {
@@ -88,12 +88,12 @@ impl QualityUpperBoundSolver {
         templates.into_iter().collect()
     }
 
-    pub fn precompute(&mut self, precompute_cp: i16) {
+    pub fn precompute(&mut self, precompute_cp: i16, condition: Condition) {
         if !self.solved_states.is_empty() || rayon::current_num_threads() <= 1 {
             return;
         }
 
-        let templates = self.generate_precompute_templates();
+        let templates = self.generate_precompute_templates(condition);
         for cp in self.durability_cost..=precompute_cp {
             if self.interrupt_signal.is_set() {
                 return;
@@ -118,7 +118,8 @@ impl QualityUpperBoundSolver {
                 })
                 .map_init(init, |pareto_front_builder, state| {
                     let state = ReducedState { cp, ..state };
-                    let pareto_front = self.solve_precompute_state(pareto_front_builder, state);
+                    let pareto_front =
+                        self.solve_precompute_state(pareto_front_builder, state, condition);
                     (state, pareto_front)
                 })
                 .collect_vec_list();
@@ -138,12 +139,13 @@ impl QualityUpperBoundSolver {
         &self,
         pareto_front_builder: &mut ParetoFrontBuilder,
         state: ReducedState,
+        condition: Condition,
     ) -> Box<[ParetoValue]> {
         pareto_front_builder.clear();
         pareto_front_builder.push_empty();
         for &action in FULL_SEARCH_ACTIONS {
             if let Ok((new_state, progress, quality)) =
-                state.use_action(action, &self.settings, self.durability_cost)
+                state.use_action(action, &self.settings, self.durability_cost, condition)
             {
                 if new_state.cp >= self.durability_cost {
                     if let Some(pareto_front) = self.solved_states.get(&new_state) {
@@ -174,7 +176,11 @@ impl QualityUpperBoundSolver {
 
     /// Returns an upper-bound on the maximum Quality achievable from this state while also maxing out Progress.
     /// There is no guarantee on the tightness of the upper-bound.
-    pub fn quality_upper_bound(&mut self, state: SimulationState) -> Result<u32, SolverException> {
+    pub fn quality_upper_bound(
+        &mut self,
+        state: SimulationState,
+        condition: Condition,
+    ) -> Result<u32, SolverException> {
         if state.effects.combo() != Combo::None {
             return Err(SolverException::InternalError(format!(
                 "\"{:?}\" combo in quality upper bound solver",
@@ -195,7 +201,7 @@ impl QualityUpperBoundSolver {
         }
 
         self.pareto_front_builder.clear();
-        self.solve_state(reduced_state)?;
+        self.solve_state(reduced_state, condition)?;
 
         if let Some(pareto_front) = self.solved_states.get(&reduced_state) {
             let index = pareto_front.partition_point(|value| value.first < required_progress);
@@ -208,7 +214,11 @@ impl QualityUpperBoundSolver {
         }
     }
 
-    fn solve_state(&mut self, state: ReducedState) -> Result<(), SolverException> {
+    fn solve_state(
+        &mut self,
+        state: ReducedState,
+        condition: Condition,
+    ) -> Result<(), SolverException> {
         if self.interrupt_signal.is_set() {
             return Err(SolverException::Interrupted);
         }
@@ -218,7 +228,7 @@ impl QualityUpperBoundSolver {
             false => FULL_SEARCH_ACTIONS,
         };
         for &action in search_actions {
-            self.build_child_front(state, action)?;
+            self.build_child_front(state, action, condition)?;
             if self.pareto_front_builder.is_max() {
                 // stop early if both Progress and Quality are maxed out
                 // this optimization would work even better with better action ordering
@@ -236,15 +246,16 @@ impl QualityUpperBoundSolver {
         &mut self,
         state: ReducedState,
         action: ActionCombo,
+        condition: Condition,
     ) -> Result<(), SolverException> {
         if let Ok((new_state, progress, quality)) =
-            state.use_action(action, &self.settings, self.durability_cost)
+            state.use_action(action, &self.settings, self.durability_cost, condition)
         {
             if new_state.cp >= self.durability_cost {
                 if let Some(pareto_front) = self.solved_states.get(&new_state) {
                     self.pareto_front_builder.push_slice(pareto_front);
                 } else {
-                    self.solve_state(new_state)?;
+                    self.solve_state(new_state, condition)?;
                 }
                 self.pareto_front_builder
                     .peek_mut()

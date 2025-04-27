@@ -2,7 +2,7 @@ use raphael_sim::*;
 
 use crate::{
     AtomicFlag, QualityUpperBoundSolver, SolverException, SolverSettings,
-    actions::{ActionCombo, QUALITY_ONLY_SEARCH_ACTIONS, use_action_combo},
+    actions::{ActionCombo, QUALITY_ONLY_SEARCH_ACTIONS, use_action_combo_with_condition},
     finish_solver::FinishSolver,
     utils::ScopedTimer,
 };
@@ -11,6 +11,7 @@ use crate::{
 struct Node {
     quality_upper_bound: u32,
     state: SimulationState,
+    condition: Condition,
 }
 
 impl PartialOrd for Node {
@@ -29,6 +30,7 @@ impl Ord for Node {
 
 pub fn fast_lower_bound(
     initial_state: SimulationState,
+    initial_condition: Condition,
     settings: SolverSettings,
     interrupt_signal: AtomicFlag,
     finish_solver: &mut FinishSolver,
@@ -40,6 +42,7 @@ pub fn fast_lower_bound(
     let initial_node = Node {
         quality_upper_bound: settings.max_quality(),
         state: initial_state,
+        condition: initial_condition,
     };
     search_queue.push(initial_node);
 
@@ -60,22 +63,30 @@ pub fn fast_lower_bound(
             ) {
                 continue;
             }
-            if let Ok(state) = use_action_combo(&settings, node.state, *action) {
+            if let Ok(state) =
+                use_action_combo_with_condition(&settings, node.state, *action, node.condition)
+            {
                 if !state.is_final(&settings.simulator_settings) {
-                    if !finish_solver.can_finish(&state) {
+                    let next_condition = node
+                        .condition
+                        .follow_up_condition_after_steps(action.steps())
+                        .unwrap_or(Condition::Normal);
+                    if !finish_solver.can_finish(&state, next_condition) {
                         continue;
                     }
                     best_achieved_quality = std::cmp::max(best_achieved_quality, state.quality);
                     if *action == ActionCombo::Single(Action::ByregotsBlessing) {
                         continue;
                     }
-                    let quality_upper_bound = quality_ub_solver.quality_upper_bound(state)?;
+                    let quality_upper_bound =
+                        quality_ub_solver.quality_upper_bound(state, next_condition)?;
                     if quality_upper_bound <= best_achieved_quality {
                         continue;
                     }
                     search_queue.push(Node {
                         quality_upper_bound,
                         state,
+                        condition: next_condition,
                     });
                 }
             }

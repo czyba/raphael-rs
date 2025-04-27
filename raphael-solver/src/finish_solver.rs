@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     SolverSettings,
-    actions::{FULL_SEARCH_ACTIONS, use_action_combo},
+    actions::{FULL_SEARCH_ACTIONS, use_action_combo_with_condition},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -55,25 +55,32 @@ impl FinishSolver {
         }
     }
 
-    pub fn can_finish(&mut self, state: &SimulationState) -> bool {
-        let max_progress = self.solve_max_progress(ReducedState::from_state(state));
+    pub fn can_finish(&mut self, state: &SimulationState, condition: Condition) -> bool {
+        let max_progress = self.solve_max_progress(ReducedState::from_state(state), condition);
         state.progress + max_progress >= self.settings.max_progress()
     }
 
-    fn solve_max_progress(&mut self, state: ReducedState) -> u32 {
+    fn solve_max_progress(&mut self, state: ReducedState, condition: Condition) -> u32 {
         match self.max_progress.get(&state) {
             Some(max_progress) => *max_progress,
             None => {
                 let mut max_progress = 0;
                 for action in FULL_SEARCH_ACTIONS {
-                    if let Ok(new_state) =
-                        use_action_combo(&self.settings, state.to_state(), *action)
-                    {
+                    if let Ok(new_state) = use_action_combo_with_condition(
+                        &self.settings,
+                        state.to_state(),
+                        *action,
+                        condition,
+                    ) {
                         if new_state.is_final(&self.settings.simulator_settings) {
                             max_progress = std::cmp::max(max_progress, new_state.progress);
                         } else {
-                            let child_progress =
-                                self.solve_max_progress(ReducedState::from_state(&new_state));
+                            let next_condition =
+                                condition.follow_up_condition().unwrap_or(Condition::Normal);
+                            let child_progress = self.solve_max_progress(
+                                ReducedState::from_state(&new_state),
+                                next_condition,
+                            );
                             max_progress =
                                 std::cmp::max(max_progress, child_progress + new_state.progress);
                         }

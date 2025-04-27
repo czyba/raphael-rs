@@ -18,7 +18,9 @@ fn solve(simulator_settings: Settings, actions: &[Action]) -> u32 {
         allow_unsound_branch_pruning: false,
     };
     let mut solver = QualityUpperBoundSolver::new(solver_settings, Default::default());
-    solver.quality_upper_bound(state).unwrap()
+    solver
+        .quality_upper_bound(state, Condition::Normal)
+        .unwrap()
 }
 
 #[test]
@@ -467,7 +469,7 @@ fn test_issue_113() {
     };
     let mut solver = QualityUpperBoundSolver::new(solver_settings, Default::default());
 
-    solver.precompute(simulator_settings.max_cp);
+    solver.precompute(simulator_settings.max_cp, Condition::Normal);
     assert_eq!(solver.computed_states(), 5_764_187);
     assert_eq!(solver.computed_values(), 214_671_922);
 }
@@ -497,7 +499,7 @@ fn test_issue_118() {
     };
     let mut solver = QualityUpperBoundSolver::new(solver_settings, Default::default());
 
-    solver.precompute(simulator_settings.max_cp);
+    solver.precompute(simulator_settings.max_cp, Condition::Normal);
     assert_eq!(solver.computed_states(), 3_388_741);
     assert_eq!(solver.computed_values(), 39_470_337);
 }
@@ -541,14 +543,18 @@ fn monotonic_fuzz_check(simulator_settings: Settings) {
         allow_unsound_branch_pruning: false,
     };
     let mut solver = QualityUpperBoundSolver::new(solver_settings, Default::default());
-    solver.precompute(simulator_settings.max_cp);
+    solver.precompute(simulator_settings.max_cp, Condition::Normal);
     for _ in 0..10000 {
         let state = random_state(&simulator_settings);
-        let state_upper_bound = solver.quality_upper_bound(state).unwrap();
+        let state_upper_bound = solver
+            .quality_upper_bound(state, Condition::Normal)
+            .unwrap();
         for action in FULL_SEARCH_ACTIONS {
             let child_upper_bound = match use_action_combo(&solver_settings, state, *action) {
                 Ok(child) => match child.is_final(&simulator_settings) {
-                    false => solver.quality_upper_bound(child).unwrap(),
+                    false => solver
+                        .quality_upper_bound(child, Condition::Normal)
+                        .unwrap(),
                     true if child.progress >= u32::from(simulator_settings.max_progress) => {
                         std::cmp::min(u32::from(simulator_settings.max_quality), child.quality)
                     }

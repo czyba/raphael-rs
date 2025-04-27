@@ -1,6 +1,6 @@
 use crate::{
     SolverSettings,
-    actions::{ActionCombo, is_progress_only_state, use_action_combo},
+    actions::{ActionCombo, is_progress_only_state, use_action_combo_with_condition},
 };
 
 use raphael_sim::*;
@@ -88,6 +88,7 @@ impl ReducedState {
         action: ActionCombo,
         settings: &SolverSettings,
         durability_cost: i16,
+        condition: Condition,
     ) -> Result<(Self, u32, u32), &'static str> {
         match action {
             ActionCombo::Single(
@@ -96,7 +97,7 @@ impl ReducedState {
             _ => {
                 let progress_only = self.progress_only;
                 let state = self.to_simulation_state(settings);
-                match use_action_combo(settings, state, action) {
+                match use_action_combo_with_condition(settings, state, action, condition) {
                     Ok(state) => {
                         let mut solver_state =
                             Self::from_simulation_state_inner(&state, settings, durability_cost);
